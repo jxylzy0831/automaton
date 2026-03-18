@@ -33,6 +33,10 @@ interface InferenceClientOptions {
 
 type InferenceBackend = "conway" | "openai" | "anthropic" | "ollama";
 
+function normalizeOpenAiCompatibleBaseUrl(baseUrl: string): string {
+  return baseUrl.replace(/\/+$/, "").replace(/\/v1$/, "");
+}
+
 export function createInferenceClient(
   options: InferenceClientOptions,
 ): InferenceClient {
@@ -98,9 +102,13 @@ export function createInferenceClient(
     }
 
     const openAiLikeApiUrl =
-      backend === "openai" ? "https://api.openai.com" :
-      backend === "ollama" ? (ollamaBaseUrl as string).replace(/\/$/, "") :
-      apiUrl;
+      backend === "openai"
+        ? normalizeOpenAiCompatibleBaseUrl(
+            process.env.OPENAI_BASE_URL || "https://api.openai.com",
+          )
+        : backend === "ollama"
+          ? normalizeOpenAiCompatibleBaseUrl(ollamaBaseUrl as string)
+          : apiUrl;
     const openAiLikeApiKey =
       backend === "openai" ? (openaiApiKey as string) :
       backend === "ollama" ? "ollama" :
