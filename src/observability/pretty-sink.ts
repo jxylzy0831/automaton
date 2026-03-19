@@ -43,6 +43,92 @@ const LEVEL_STYLES: Record<string, (s: string) => string> = {
   fatal: chalk.red.bold,
 };
 
+function summarizeToolResult(message: string): string | null {
+  const toolMatch = message.match(/^\[TOOL RESULT\]\s+([^:]+):\s*([\s\S]*)$/);
+  if (!toolMatch) return null;
+
+  const tool = toolMatch[1].trim();
+  const body = toolMatch[2].trim();
+
+  if (body.startsWith("ERROR:")) {
+    return `${tool} 执行失败：${body.slice("ERROR:".length).trim()}`;
+  }
+
+  if (tool === "check_credits") {
+    const match = body.match(/Credit balance:\s*\$(.+?)\s*\((\d+)\s*cents\)/i);
+    if (match) {
+      return `当前 Conway credits 余额：$${match[1]}（${match[2]} cents）`;
+    }
+  }
+
+  if (tool === "check_usdc_balance") {
+    const match = body.match(/USDC balance:\s*([0-9.]+)\s*USDC on (.+)$/i);
+    if (match) {
+      return `当前 USDC 余额：${match[1]}，网络：${match[2]}`;
+    }
+  }
+
+  if (tool === "list_goals" && /No active goals/i.test(body)) {
+    return "当前没有活动目标，可通过 create_goal 创建。";
+  }
+
+  if (tool === "orchestrator_status") {
+    const phase = body.match(/Phase:\s*(.+)/i)?.[1]?.trim();
+    const goals = body.match(/Active goals:\s*(\d+)/i)?.[1];
+    const tasks = body.match(/Tasks:\s*(.+)/i)?.[1]?.trim();
+    if (phase || goals || tasks) {
+      return `编排器状态：阶段=${phase || "未知"}，活动目标=${goals || "未知"}，任务=${tasks || "未知"}`;
+    }
+  }
+
+  if (tool === "switch_model") {
+    const match = body.match(/Inference model switched to\s+(.+?)\.\s+Reason:\s+(.+?)(?:\.\s+Change persisted to config\.)?$/i);
+    if (match) {
+      return `模型已切换为 ${match[1]}。原因：${match[2]}`;
+    }
+  }
+
+  if (tool === "view_soul") {
+    const name = body.match(/Name:\s*(.+)/i)?.[1]?.trim();
+    const alignment = body.match(/Genesis alignment:\s*([0-9.]+)/i)?.[1];
+    const purpose = body.match(/Core purpose:\s*(.+)/i)?.[1]?.trim();
+    if (name || alignment || purpose) {
+      return `SOUL 信息：名称=${name || "未知"}，使命对齐度=${alignment || "未知"}，核心目的=${purpose || "未提取到"}`;
+    }
+  }
+
+  if (tool === "system_synopsis") {
+    const name = body.match(/Name:\s*(.+)/i)?.[1]?.trim();
+    const creator = body.match(/Creator:\s*(.+)/i)?.[1]?.trim();
+    const state = body.match(/State:\s*(.+)/i)?.[1]?.trim();
+    const turns = body.match(/Total turns:\s*(\d+)/i)?.[1];
+    const model = body.match(/Model:\s*(.+)/i)?.[1]?.trim();
+    if (name || creator || state || turns || model) {
+      return `系统概览：名称=${name || "未知"}，创建者=${creator || "未知"}，状态=${state || "未知"}，累计回合=${turns || "未知"}，模型=${model || "未知"}`;
+    }
+  }
+
+  if (tool === "exec") {
+    const exitCode = body.match(/exit_code:\s*(\d+)/i)?.[1];
+    const stdout = body.match(/stdout:\s*([\s\S]*?)(?:\nstderr:|$)/i)?.[1]?.trim();
+    const stderr = body.match(/stderr:\s*([\s\S]*)$/i)?.[1]?.trim();
+
+    if (exitCode === "0") {
+      if (stdout) {
+        const firstLine = stdout.split(/\r?\n/)[0];
+        return `命令执行成功，退出码 0。输出摘要：${firstLine}`;
+      }
+      return "命令执行成功，退出码 0。";
+    }
+
+    if (exitCode) {
+      return `命令执行失败，退出码 ${exitCode}${stderr ? `。错误：${stderr}` : ""}`;
+    }
+  }
+
+  return null;
+}
+
 function translateMessage(message: string): string | null {
   const rules: Array<[RegExp, (...groups: string[]) => string]> = [
     [/^\[WAKE UP\]\s+(.+?) is alive\. Credits: \$(.+)$/s, (name, credits) => `[唤醒] ${name} 已恢复运行。Credits：$${credits}`],
@@ -121,6 +207,11 @@ export function prettySink(entry: LogEntry): void {
 
     if (translated) {
       line += "\n" + chalk.cyan("  " + translated);
+    }
+
+    const toolSummary = summarizeToolResult(entry.message);
+    if (toolSummary) {
+      line += "\n" + chalk.cyan("  " + toolSummary);
     }
 
     if (entry.error) {
