@@ -43,6 +43,48 @@ const LEVEL_STYLES: Record<string, (s: string) => string> = {
   fatal: chalk.red.bold,
 };
 
+function translateMessage(message: string): string | null {
+  const rules: Array<[RegExp, (...groups: string[]) => string]> = [
+    [/^\[WAKE UP\]\s+(.+?) is alive\. Credits: \$(.+)$/s, (name, credits) => `[唤醒] ${name} 已恢复运行。Credits：$${credits}`],
+    [/^\[THINK\]\s+Routing inference \(tier: (.+?), model: (.+?)\)\.\.\.$/s, (tier, model) => `[思考] 正在路由推理。层级：${tier}，模型：${model}`],
+    [/^\[TOOL\]\s+(.+)$/s, (rest) => `[工具] ${rest}`],
+    [/^\[TOOL RESULT\]\s+(.+)$/s, (rest) => `[工具结果] ${rest}`],
+    [/^\[THOUGHT\]\s+(.+)$/s, (rest) => `[想法] ${rest}`],
+    [/^\[CRITICAL\]\s+(.+)$/s, (rest) => `[严重] ${rest}`],
+    [/^\[ERROR\]\s+(.+)$/s, (rest) => `[错误] ${rest}`],
+    [/^\[FATAL\]\s+(.+)$/s, (rest) => `[致命] ${rest}`],
+    [/^\[IDLE\]\s+(.+)$/s, (rest) => `[空闲] ${rest}`],
+    [/^\[LOOP\]\s+(.+)$/s, (rest) => `[循环] ${rest}`],
+    [/^\[LOOP END\]\s+Agent loop finished\. State: (.+)$/s, (state) => `[循环结束] Agent 主循环结束。状态：${state}`],
+    [/^\[LOOP\]\s+Maintenance loop detected: (.+)$/s, (rest) => `[循环] 检测到维护型空转：${rest}`],
+    [/^\[LOOP\]\s+Repetitive pattern detected: (.+)$/s, (rest) => `[循环] 检测到重复模式：${rest}`],
+    [/^\[[^\]]+\]\s+State: (.+)$/s, (state) => `状态：${state}`],
+    [/^\[[^\]]+\]\s+Shutting down\.\.\.$/s, () => `正在关闭...`],
+    [/^\[[^\]]+\]\s+Turn ([A-Z0-9]+): (\d+) tools, (\d+) tokens$/s, (turnId, tools, tokens) => `回合 ${turnId}：调用了 ${tools} 个工具，总计 ${tokens} tokens`],
+    [/^Bootstrap topup skipped: USDC balance \$(.+) below minimum tier \(\$(.+)\)$/s, (balance, minimum) => `启动补充已跳过：USDC 余额 $${balance}，低于最小档位要求 $${minimum}`],
+    [/^Bootstrap topup: credits=\$(.+), USDC=\$(.+), buying \$(.+)$/s, (credits, usdc, amount) => `启动补充：当前 credits $${credits}，USDC $${usdc}，准备购买 $${amount}`],
+    [/^Attempting credit topup: \$(.+) USD for (.+)$/s, (amount, address) => `正在尝试充值 credits：金额 $${amount}，钱包地址 ${address}`],
+    [/^Credit topup successful: \$(.+) USD → (.+) credits cents$/s, (amount, cents) => `充值成功：$${amount} USD -> ${cents} credits cents`],
+    [/^\[[^\]]+\]\s+Bootstrap topup: \+\$(.+) credits from USDC$/s, (amount) => `启动时已通过 USDC 补充 credits：+$${amount}`],
+    [/^Daemon started\. Tick interval: (.+) \(from config\)$/s, (interval) => `守护进程已启动。Tick 间隔：${interval}（来自配置）`],
+    [/^\[[^\]]+\]\s+Heartbeat daemon started\.$/s, () => `Heartbeat 守护进程已启动。`],
+    [/^\[HEARTBEAT\]\s+Wake request: (.+)$/s, (reason) => `[心跳] 唤醒请求：${reason}`],
+  ];
+
+  for (const [pattern, formatter] of rules) {
+    const match = message.match(pattern);
+    if (match) {
+      return formatter(...match.slice(1));
+    }
+  }
+
+  if (message.startsWith("State: ")) {
+    return `状态：${message.slice("State: ".length)}`;
+  }
+
+  return null;
+}
+
 function formatTime(iso: string): string {
   const d = new Date(iso);
   const hh = String(d.getHours()).padStart(2, "0");
@@ -75,6 +117,11 @@ export function prettySink(entry: LogEntry): void {
     const msg = formatMessage(entry.message);
 
     let line = `${time} ${level} ${mod} ${msg}`;
+    const translated = translateMessage(entry.message);
+
+    if (translated) {
+      line += "\n" + chalk.cyan("  " + translated);
+    }
 
     if (entry.error) {
       line += "\n" + chalk.red("  " + entry.error.message);
